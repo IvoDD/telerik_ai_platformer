@@ -1,0 +1,371 @@
+﻿const terrainX = 8000, terrainY = 6000;
+var isMouseDown = false;
+var cameraX=terrainX/2, cameraY=terrainY/2;
+
+function draw_from_camera(x, y, sx, sy){
+    context.fillRect(x-cameraX+canvas.width/2-sx/2, y-cameraY+canvas.height/2-sy/2, sx, sy);
+}
+function drw_img(img, x, y, sx, sy, alpha){
+    if (alpha==0){
+        context.drawImage(img, x-cameraX+canvas.width/2-sx/2, y-cameraY+canvas.height/2-sy/2, sx, sy);
+        return;
+    }
+    context.save();
+    context.translate(x-cameraX+canvas.width/2, y-cameraY+canvas.height/2);
+    context.rotate(alpha);
+    context.drawImage(img, -sx/2, -sy/2, sx, sy);
+    context.restore();
+}
+function coll(obj1, obj2){
+    return areColliding(
+        obj1.x-obj1.sx/2, obj1.y-obj1.sy/2, obj1.sx, obj1.sy,
+        obj2.x-obj2.sx/2, obj2.y-obj2.sy/2, obj2.sx, obj2.sy
+    );
+}
+function d(x1, y1, x2, y2){
+    return Math.sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1));
+}
+
+class Platform{
+    constructor(x, y, sx){
+        this.x = x;
+        this.oldx = this.x;
+        this.y = y;
+        this.oldy = this.y;
+        this.sx = sx;
+        this.sy = 40;
+        this.img = new Image();
+        this.img.src = 'platform.png';
+    }
+    move(){
+        this.oldx = this.x;
+        this.oldy = this.y;
+    }
+    draw(){
+        context.fillStyle = this.color;
+        drw_img(this.img, this.x, this.y, this.sx*1.2, this.sy*1.7, 0);
+    }
+};
+
+class MovingPlatform extends Platform{
+    constructor(x1, y1, sx, x2, y2, t){
+        super(x1, y1, sx);
+        this.x1 = x1;
+        this.y1 = y1;
+        this.x2 = x2;
+        this.y2 = y2;
+        this.t = t;
+        this.alpha = 0;
+    }
+    move(){
+        super.move();
+        this.alpha+=2/this.t*Math.PI;
+        let sin = (Math.sin(this.alpha)+1)/2;
+        this.x = sin*this.x1 + (1-sin)*this.x2;
+        this.y = sin*this.y1 + (1-sin)*this.y2;
+    }
+}
+
+var np = 200
+var plats = [];
+plats[0] = new Platform(terrainX/2, terrainY, terrainX);
+for (let i=1; i<np; ++i){
+    let x = Math.floor(Math.random()*terrainX/450)*450;
+    let y = Math.floor(Math.random()*terrainY/200)*200;
+    if (Math.random()<0.2)
+        plats[i] = new MovingPlatform(x, y, 400, x+(Math.floor(Math.random()*3)-1)*450, y+(Math.floor(Math.random()*3)-1)*200, Math.random()*100+200);
+    else
+        plats[i] = new Platform(x, y, 400);
+}
+
+class Player{
+    constructor(ind){
+        this.x = cameraX + Math.random()*100-50;
+        this.y = cameraY;
+        this.sx = 40;
+        this.sy = 70;
+        this.color = 'blue';
+        this.dy = 0;
+        this.step = -1;
+        this.health = 100;
+        this.inv = 0;
+        this.img = [new Image(), new Image(), new Image()];
+        this.img_flip = [new Image(), new Image(), new Image()];
+        this.img[0].src = 'hero0.png'; this.img[1].src = 'hero1.png'; this.img[2].src = 'hero2.png';
+        this.img_flip[0].src = 'hero0_flipped.png'; this.img_flip[1].src = 'hero1_flipped.png'; this.img_flip[2].src = 'hero2_flipped.png';
+        this.img_ind = 0;
+        this.ind = ind;
+        this.weapon_hold = ind;
+    }
+    jump(){
+        if (this.health <= 0) return;
+        if (this.step!=-1){
+            this.dy = -12;
+            this.step = -1;
+        }
+    }
+    hit(dmg){
+        if (this.health <= 0) return;
+        if (this.inv == 0){
+            this.health -= dmg;
+            this.inv = 10;
+        }
+    }
+    fall(){
+        if (this.step!=-1){
+            this.step=-1;
+            this.dy = 0;
+        }
+    }
+    pickup(){
+        let closest=1, dist=terrainX+terrainY+1000;
+        for (let i=0; i<weapons.length; ++i){
+            let cdist = d(this.x, this.y, weapons[i].x, weapons[i].y);
+            if (cdist < dist && weapons[i].held_by==-1){
+                dist = cdist;
+                closest = i;
+            }
+        }
+        if (dist < 100){
+            weapons[this.weapon_hold].held_by = -1;
+            this.weapon_hold = closest;
+            weapons[closest].held_by = this.ind;
+        }
+    }
+    shoot(tx, ty){
+        weapons[this.weapon_hold].shoot(tx, ty);
+    }
+    move_left(){
+        this.x -= 5;
+    }
+    move_right(){
+        this.x += 5;
+    }
+    update(){
+        if (this.y >= terrainY + 100) this.health=0;
+        if (this.health <= 0){
+            weapons[this.weapon_hold].held_by = -1;
+            player[this.ind] = player[player.length-1];
+            player[this.ind].ind = this.ind;
+            player.pop();
+        }
+        if (this.inv > 0) --this.inv;
+        let oldy = this.y;
+        if (this.step==-1){
+            this.dy += 0.17;
+            this.y += this.dy;
+        }else{
+            this.x += plats[this.step].x - plats[this.step].oldx;
+            this.y += plats[this.step].y - plats[this.step].oldy;
+        }
+        if (this.step!=-1 && (this.x+this.sx/2 < plats[this.step].x-plats[this.step].sx/2 || this.x-this.sx/2 > plats[this.step].x+plats[this.step].sx/2)){
+            this.step = -1;
+            this.dy = 0;
+        }
+        for (let i=0; i<np; ++i){
+            if (coll(this, plats[i]) && plats[i].oldy-oldy > this.sy/2+plats[i].sy/2){
+                this.step = i;
+                this.y = plats[i].y-this.sy/2-plats[i].sy/2;
+            }
+        }
+    }
+    draw(){
+        if (this.health <= 0) return;
+        context.fillStyle = 'rgba(0, 0, 255, 0.5)';
+        draw_from_camera(this.x, this.y-this.sy/2-20, this.health, 10);
+        if (this.inv%2==0) context.fillStyle = this.color;
+        if (mouseX >= canvas.width/2){
+            if (this.step==-1){
+                drw_img(this.img[1], this.x, this.y, this.sx, this.sy, 0);
+            }else{
+                drw_img(this.img[Math.floor(this.img_ind/10)], this.x, this.y, this.sx, this.sy, 0);
+            }
+        }else{
+            if (this.step==-1){
+                drw_img(this.img_flip[1], this.x, this.y, this.sx, this.sy, 0);
+            }else{
+                drw_img(this.img_flip[Math.floor(this.img_ind/10)], this.x, this.y, this.sx, this.sy, 0);
+            }
+        }
+    }
+}
+
+class Human extends Player{
+    update(){
+        super.update();
+        if (isKeyPressed[65]) this.move_left()
+        if (isKeyPressed[68]) this.move_right();
+        cameraX = this.x;
+        cameraY = this.y;
+    }
+}
+
+class AI extends Player{
+    update(){
+        super.update();
+        //indeks na vashia player e this.ind
+        //vsichki indeksi sa ot 0 do player.length-1
+        //playerite sa v masiv player
+        this.jump();
+        this.shoot(player[0].x, player[0].y);
+        if (this.x < player[0].x) this.move_right();
+        else this.move_left();
+    }
+}
+
+var player = [new Human(0), new AI(1)];
+
+var bullets = [];
+class Bullet{
+    constructor(x, y, sx, sy, targetX, targetY, speed, dmg, img, ind, shot_by){
+        this.x = x;
+        this.y = y;
+        this.sx = sx;
+        this.sy = sy;
+        let dist = d(x, y, targetX, targetY);
+        //console.log("dist", dist)
+        this.dx = (targetX-x)/dist*speed;
+        this.dy = (targetY-y)/dist*speed;
+        this.alpha = Math.atan2(this.dy, this.dx);
+        this.speed = speed;
+        this.img = new Image();
+        this.img.src = img;
+        this.dmg = dmg;
+        this.ind = ind;
+        this.shot_by = shot_by;
+    }
+    del(){
+        bullets[this.ind] = bullets[bullets.length-1];
+        bullets[this.ind].ind = this.ind;
+        bullets.pop();
+    }
+    update(){
+        this.x+=this.dx;
+        this.y+=this.dy;
+        if (this.x > terrainX+canvas.width ||
+           this.x < -canvas.width ||
+           this.y > terrainY+canvas.height ||
+           this.y < -canvas.height){
+            this.del();
+            return;
+        }
+        for (let i=0; i<player.length; ++i){
+            if (coll(this, player[i]) && i!=this.shot_by){
+                player[i].hit(this.dmg);
+                this.del();
+                return;
+            }
+        }
+    }
+    draw(){
+        drw_img(this.img, this.x, this.y, this.sx, this.sy, this.alpha);
+    }
+}
+
+class Weapon{
+    constructor(x, y, held_by=-1){
+        this.x = x;
+        this.y = y;
+        this.sx = 50;
+        this.sy = 50;
+        this.img = new Image();
+        this.img.src = 'pistol.png';
+        this.img_flip = new Image();
+        this.img_flip.src = 'pistol_flip.png';
+        this.held_by = held_by;
+        this.reaload_time = 30;
+        this.curr_reload = 0;
+        this.dirX = 100;
+        this.dirY = 0;
+        this.alpha = 0;
+    }
+    update(){
+        if (this.held_by != -1){
+            if (this.curr_reload > 0) --this.curr_reload;
+            this.y = player[this.held_by].y;
+            if (mouseX-canvas.width/2+cameraX > player.x)
+                this.x = player[this.held_by].x+10;
+            else                
+                this.x = player[this.held_by].x-10;
+        }
+    }
+    shoot(tx, ty){
+        if (this.held_by != -1 && this.curr_reload==0){
+            bullets.push(new Bullet(this.x, this.y, 20, 10, tx, ty, 10, 2, 'bullet.png', bullets.length, this.held_by));
+            this.curr_reload = this.reaload_time;
+        }
+        if (this.held_by != -1){
+            this.dirX=tx-this.x
+            this.dirY=ty-this.y
+            this.alpha = Math.atan2(this.dirY, this.dirX);
+        }
+    }
+    draw(){
+        if (this.dirX >= 0) drw_img(this.img, this.x, this.y, this.sx, this.sy, this.alpha);
+        else drw_img(this.img_flip, this.x, this.y, this.sx, this.sy, this.alpha);
+    }
+}
+
+class AK47 extends Weapon{
+    constructor(x, y, held_by=-1){
+        super(x, y, held_by);
+        this.img.src = 'ak47.png';
+        this.img_flip.src = 'ak47_flip.png';
+        this.reaload_time = 5;
+    }
+}
+
+var nw = 100;
+var weapons = [];
+weapons[0] = new Weapon(player[0].x, player[0].y, 0);
+weapons[1] = new Weapon(player[1].x, player[1].y, 1);
+for (let i=2; i<nw; ++i){
+    weapons[i] = new AK47(Math.random()*terrainX, Math.random()*terrainY);
+}
+
+function update() {
+    for (let i=0; i<np; ++i){
+        plats[i].move();
+    }
+    for (let i=0; i<player.length; ++i){
+        player[i].update();
+    }
+    for (let i=0; i<weapons.length; ++i){
+        weapons[i].update();
+    }
+    if (isMouseDown) player[0].shoot(mouseX+cameraX-canvas.width/2, mouseY+cameraY-canvas.height/2);
+    for (let i=0; i<bullets.length; ++i){
+        bullets[i].update();
+    }
+}
+
+var background = new Image();
+background.src = 'background.jpg'
+
+function draw() {
+    context.drawImage(background, -cameraX/terrainX*canvas.width, -cameraY/terrainY*canvas.height, canvas.width*2, canvas.height*2);
+    for (let i=0; i<np; ++i){
+        plats[i].draw();
+    }
+    for (let i=0; i<player.length; ++i){
+        player[i].draw();
+    }
+    for (let i=0; i<nw; ++i){
+        weapons[i].draw();
+    }
+    for (let i=0; i<bullets.length; ++i){
+        bullets[i].draw();
+    }
+};
+
+function keydown(key) {
+    if (key==32) player[0].jump();
+    if (key==83) player[0].fall();
+    if (key==69) player[0].pickup();
+};
+function mousedown(){
+    isMouseDown=true;
+}
+function mouseup() {
+    isMouseDown=false;
+};
